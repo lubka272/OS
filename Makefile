@@ -149,6 +149,24 @@ UPROGS=\
 	$U/_grind\
 	$U/_wc\
 	$U/_zombie\
+	$U/_pipe1\
+	$U/_sleep\
+	$U/_pingpong\
+	$U/_primes\
+	$U/_find\
+	$U/_trace\
+	$U/_copy\
+	$U/_open\
+	$U/_fork\
+	$U/_exec\
+	$U/_redirect\
+
+
+
+
+
+
+
 
 
 ifeq ($(LAB),syscall)

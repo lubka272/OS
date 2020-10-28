@@ -26,7 +26,6 @@ kvminit()
 
   // uart registers
   kvmmap(UART0, UART0, PGSIZE, PTE_R | PTE_W);
-
   // virtio mmio disk interface
   kvmmap(VIRTIO0, VIRTIO0, PGSIZE, PTE_R | PTE_W);
 
@@ -439,4 +438,25 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
   } else {
     return -1;
   }
+}
+
+void rec_vmprint(pagetable_t pagetable, int level){
+  for (int i=0; i<512; i++){
+    pte_t pte = pagetable[i];
+    if(pte & PTE_V){
+      uint64 child= PTE2PA(pte);
+      for(int j=0;j<level;j++){
+	  printf(" ..");
+      }
+      printf("%d: pte %p pa %p\n", i, pte, child);
+      if((pte & (PTE_R|PTE_W|PTE_X)) == 0){
+	  rec_vmprint((pagetable_t)child,level+1);
+      }
+    }
+  }
+}
+
+void vmprint(pagetable_t pagetable){
+  printf("page table %p\n",pagetable);
+  rec_vmprint(pagetable,1);
 }

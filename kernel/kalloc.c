@@ -18,16 +18,24 @@ struct run {
   struct run *next;
 };
 
-struct {
+struct kmem {
   struct spinlock lock;
   struct run *freelist;
 } kmem;
 
+struct kmem cpu_kmem[NCPU];
+
 void
 kinit()
 {
-  initlock(&kmem.lock, "kmem");
+  for(int i = 0; i < NCPU; i++ ){
+  
+    initlock(&cpu_kmem[i].lock,"kmem");//nie jedne zamok ale kazdy CPU bude mat zamok 
+  }
+  //alokuj celu pamat aktualnemu procesu
+  
   freerange(end, (void*)PHYSTOP);
+  
 }
 
 void
@@ -55,11 +63,18 @@ kfree(void *pa)
   memset(pa, 1, PGSIZE);
 
   r = (struct run*)pa;
-
-  acquire(&kmem.lock);
-  r->next = kmem.freelist;
-  kmem.freelist = r;
-  release(&kmem.lock);
+//tuto som len pridala [id] aby to bolo paralelne pri uvolnovani pamate vypnem prerusenia
+  push_off();
+  int id = cpuid();
+  acquire(&cpu_kmem[id].lock);//ziskanie zamku pre dany proces
+  r->next = cpu_kmem[id].freelist;
+  cpu_kmem[id].freelist = r;
+  release(&cpu_kmem[id].lock);
+  pop_off();//vypnutie preruseni
+ 
+ 
+  
+ 
 }
 
 // Allocate one 4096-byte page of physical memory.
@@ -69,12 +84,35 @@ void *
 kalloc(void)
 {
   struct run *r;
+  push_off();
+  int id = cpuid();
+  acquire(&cpu_kmem[id].lock);
+  r = cpu_kmem[id].freelist;
+  if(r){
+    cpu_kmem[id].freelist = r->next;
+    release(&cpu_kmem[id].lock);
+  }
+  else{
+    release(&cpu_kmem[id].lock);
+    int current= id+1;
+  do {
+    acquire(&cpu_kmem[current].lock);
+    r = cpu_kmem[current].freelist;
 
-  acquire(&kmem.lock);
-  r = kmem.freelist;
-  if(r)
-    kmem.freelist = r->next;
-  release(&kmem.lock);
+      if(r){
+	cpu_kmem[current].freelist = r->next;
+	release(&cpu_kmem[current].lock);
+	break;
+      }
+      release(&cpu_kmem[current].lock);
+      current++;
+      if(current == NCPU){
+	current = 0;
+      }
+    }while(current != id);
+  }
+  
+  pop_off(); // vypni prer.
 
   if(r)
     memset((char*)r, 5, PGSIZE); // fill with junk

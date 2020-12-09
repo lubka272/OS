@@ -86,7 +86,7 @@ sys_kill(void)
 // return how many clock tick interrupts have occurred
 // since start.
 uint64
-sys_uptime(void)
+sys_uptime(void) //
 {
   uint xticks;
 

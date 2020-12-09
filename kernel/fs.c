@@ -380,14 +380,14 @@ bmap(struct inode *ip, uint bn)
   uint addr, *a;
   struct buf *bp;
 
-  if(bn < NDIRECT){
+  if(bn < NDIRECT){ //priame bloky
     if((addr = ip->addrs[bn]) == 0)
       ip->addrs[bn] = addr = balloc(ip->dev);
     return addr;
   }
   bn -= NDIRECT;
 
-  if(bn < NINDIRECT){
+  if(bn < NINDIRECT){ //nepriama tabulka
     // Load indirect block, allocating if necessary.
     if((addr = ip->addrs[NDIRECT]) == 0)
       ip->addrs[NDIRECT] = addr = balloc(ip->dev);
@@ -400,23 +400,48 @@ bmap(struct inode *ip, uint bn)
     brelse(bp);
     return addr;
   }
+  
+  bn -= NINDIRECT;
 
-  panic("bmap: out of range");
+  if(bn < NDINDIRECT){ //dvojito nepriama tabulka
+    // Load double indirect block, allocating if necessary.
+    if((addr = ip->addrs[NDIRECT+1]) == 0) //pokial tabulka neexistuje allocujem ju
+      ip->addrs[NDIRECT+1] = addr = balloc(ip->dev);
+    bp = bread(ip->dev, addr); //v addr mam adresu bloku tak ho nacitam 
+    a = (uint*)bp->data; //v a mam pole blokov
+    if((addr = a[bn/NINDIRECT]) == 0){ //ak sa nenachadza ta prva tabulka v dvojito nepriamom bloku alokujem ju
+      a[bn/NINDIRECT] = addr = balloc(ip->dev);
+      log_write(bp);
+    }
+    brelse(bp);
+    
+    //nacitaj 2.tabulku v dvojito nepriamom bloku, uz ju nemusim alokovat lebo som ju v predoslom kroku alokovala
+    bp = bread(ip->dev, addr);
+    a = (uint*)bp->data;
+    if((addr = a[bn % NINDIRECT]) == 0){ //zistim index zaznamu druhej tabulke ak nieje alokujem uz priamo ten zaznam v 2.tabulke
+      a[bn % NINDIRECT] = addr = balloc(ip->dev);
+      log_write(bp);
+    }
+    brelse(bp);
+    return addr;
+  }
+
+  panic("bmap: out of range"); //ak je prilis velky subor panic
 }
 
 // Truncate inode (discard contents).
 // Caller must hold ip->lock.
 void
-itrunc(struct inode *ip)
+itrunc(struct inode *ip) //tato fcia odstrani kazdu pouzitu tabulku a na kazdy pouzity blok zavola bfree
 {
   int i, j;
-  struct buf *bp;
-  uint *a;
+  struct buf *bp, *bp2;
+  uint *a, *a2;
 
   for(i = 0; i < NDIRECT; i++){
     if(ip->addrs[i]){
       bfree(ip->dev, ip->addrs[i]);
-      ip->addrs[i] = 0;
+      ip->addrs[i] = 0; ////na priame bloky zapisem nulu
     }
   }
 
@@ -429,7 +454,30 @@ itrunc(struct inode *ip)
     }
     brelse(bp);
     bfree(ip->dev, ip->addrs[NDIRECT]);
-    ip->addrs[NDIRECT] = 0;
+    ip->addrs[NDIRECT] = 0; ////na nepriamu tabulku zapisem nulu
+  }
+  
+  //prva tabulka dvojito nepriamych blokov
+  if(ip->addrs[NDIRECT+1]){//ak tabulka existuje precitaj ju
+    bp = bread(ip->dev, ip->addrs[NDIRECT+1]);
+    a = (uint*)bp->data;
+    for(j = 0; j < NINDIRECT; j++){
+      if(a[j]) //ak zaznam v 1. tabulke existuje musime nacitat dalsiu tabulku
+      {
+      bp2 = bread(ip->dev, a[j]); //musim mat nove premenne lebo nacitavam dalsiu tabulku, a[j] je absolutne cislo bloku na disku
+      a2 = (uint*)bp2->data;
+        for(i = 0; i < NINDIRECT; i++){ //prechadzam vsetky zaznamy v druhej tabulke
+      		if(a2[i]) //ak zaznam v 2.tabulke existuje mozem ho uvolnit
+        		bfree(ip->dev, a2[i]);
+    	}
+    	brelse(bp2); //uvolnim celu 2. tabulku
+    	bfree(ip->dev, a[j]); //uvolnim aj ten blok v prvej tabulke
+      }
+    }
+    brelse(bp); //uvolnim aj celu 1.tabulku
+    bfree(ip->dev, ip->addrs[NDIRECT+1]); 
+    ip->addrs[NDIRECT+1]=0; //na dvojito nepriamu tabulku zapisem nulu
+
   }
 
   ip->size = 0;
